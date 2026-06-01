@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserdata/
+*.aireader.json
+.DS_Store
+dist/
+*.dmg
+!release/uprakigo-0.1.dmg
+*.app
+*.xcresult
+aireader-three-page-*
+docs/superpowers/
