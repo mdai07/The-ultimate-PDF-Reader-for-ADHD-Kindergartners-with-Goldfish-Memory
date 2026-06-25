@@ -114,13 +114,19 @@ final class LocalCLIProvider: AIProvider {
     ) async throws -> String {
         try await Task.detached(priority: .userInitiated) {
             let process = Process()
-            let inputPipe = Pipe()
             let outputPipe = Pipe()
             let errorPipe = Pipe()
+            let promptURL = temporaryPromptURL()
+            try prompt.write(to: promptURL, atomically: true, encoding: .utf8)
+            let inputHandle = try FileHandle(forReadingFrom: promptURL)
+            defer {
+                try? inputHandle.close()
+                try? FileManager.default.removeItem(at: promptURL)
+            }
 
             process.executableURL = executableURL
             process.arguments = arguments
-            process.standardInput = inputPipe
+            process.standardInput = inputHandle
             process.standardOutput = outputPipe
             process.standardError = errorPipe
 
@@ -128,11 +134,6 @@ final class LocalCLIProvider: AIProvider {
 
             let outputReader = asyncReadData(from: outputPipe.fileHandleForReading)
             let errorReader = asyncReadData(from: errorPipe.fileHandleForReading)
-
-            if let data = prompt.data(using: .utf8) {
-                inputPipe.fileHandleForWriting.write(data)
-            }
-            try? inputPipe.fileHandleForWriting.close()
 
             let startedAt = Date()
             while process.isRunning {
@@ -169,6 +170,11 @@ final class LocalCLIProvider: AIProvider {
             return output
         }
         .value
+    }
+
+    private static func temporaryPromptURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("aireader-local-agent-prompt-\(UUID().uuidString).txt")
     }
 
     private static func asyncReadData(from handle: FileHandle) -> () -> Data {
