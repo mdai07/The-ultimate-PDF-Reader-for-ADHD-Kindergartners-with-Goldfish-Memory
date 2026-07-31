@@ -13,6 +13,7 @@ So it gives you a serious paper-reading workflow wrapped in a deeply unserious n
 ## What It Does
 
 - Opens academic PDFs in a native SwiftUI/PDFKit macOS reader.
+- Opens each PDF in its own tab, supports split reading and detached windows, and restores window and pane layouts between launches.
 - Adds highlights, notes, ink, signatures, text boxes, region selections, and margin comments.
 - Connects comments to selected text, figures, tables, or manually chosen anchors with lightweight curved links.
 - Stores app metadata inside the PDF so normal PDF readers can still open the file without showing the AIReader state.
@@ -21,6 +22,7 @@ So it gives you a serious paper-reading workflow wrapped in a deeply unserious n
 - Builds an outline from sections, appendices, figures, and tables.
 - Uses AI for selected text, equations, plots, tables, and whole-paper questions.
 - Supports hosted DeepSeek and Gemini models, plus local `codex` and `claude` CLI agents when available.
+- Supports trackpad pinch zoom and independently hideable, resizable outline and AI sidebars.
 
 ## Project Structure
 
@@ -37,6 +39,8 @@ The core target intentionally avoids `SwiftUI`, `AppKit`, `PDFKit`, and `Vision`
 - Gemini through `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_MODEL_FAST`.
 - Local Codex CLI, discovered on startup with `which codex`.
 - Local Claude CLI, discovered on startup with `which claude`.
+
+Local Codex includes GPT-5.6 Sol, Terra, and Luna presets. Thinking choices are filtered to the levels supported by the selected model, including Max and Ultra where available.
 
 The sidebar chat is meant for full paper Q&A. Inline suggestions are meant to be fast, concise explanations of the selected text, equation, figure, or table.
 

@@ -23,7 +23,7 @@ struct UprakigoPreferencesView: View {
 
                 if state.selectedChatAgentIsLocalCLI {
                     Picker("Chat thinking effort", selection: $state.chatThinkingEffort) {
-                        ForEach(LocalAgentThinkingEffort.allCases) { effort in
+                        ForEach(state.chatThinkingEffortOptions) { effort in
                             Text(effort.title).tag(effort)
                         }
                     }
@@ -31,7 +31,7 @@ struct UprakigoPreferencesView: View {
 
                 if state.selectedInlineAgentIsLocalCLI {
                     Picker("Inline thinking effort", selection: $state.inlineThinkingEffort) {
-                        ForEach(LocalAgentThinkingEffort.allCases) { effort in
+                        ForEach(state.inlineThinkingEffortOptions) { effort in
                             Text(effort.title).tag(effort)
                         }
                     }
@@ -55,7 +55,7 @@ struct UprakigoPreferencesView: View {
                                 }
                                 Divider()
                                 ForEach(LocalAgentCommandBuilder.commonCodexModels, id: \.self) { model in
-                                    Button(model) {
+                                    Button(LocalAgentCommandBuilder.codexModelTitle(model)) {
                                         state.codexModelName = model
                                     }
                                 }
@@ -76,7 +76,7 @@ struct UprakigoPreferencesView: View {
                                 }
                                 Divider()
                                 ForEach(LocalAgentCommandBuilder.commonCodexInlineModels, id: \.self) { model in
-                                    Button(model == LocalAgentCommandBuilder.codexMiniModel ? "GPT mini (\(model))" : model) {
+                                    Button(LocalAgentCommandBuilder.codexModelTitle(model)) {
                                         state.codexInlineModelName = model
                                     }
                                 }

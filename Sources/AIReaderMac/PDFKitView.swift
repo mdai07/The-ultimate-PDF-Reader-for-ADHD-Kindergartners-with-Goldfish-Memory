@@ -92,6 +92,10 @@ struct PDFKitView: NSViewRepresentable {
         view.onRegionSelected = { pageIndex, bounds in
             context.coordinator.onRegionSelected(pageIndex, bounds)
         }
+        view.onScaleChangedByGesture = { scale in
+            context.coordinator.scaleFactor.wrappedValue = scale
+            context.coordinator.autoScales.wrappedValue = false
+        }
         view.activeTool = activeTool
         view.highlightColorHex = highlightColorHex
         view.onAnnotationCreated = onAnnotationCreated
@@ -163,6 +167,10 @@ struct PDFKitView: NSViewRepresentable {
             readerView.onOCRPageRequested = onOCRPageRequested
             readerView.onRegionSelected = { pageIndex, bounds in
                 context.coordinator.onRegionSelected(pageIndex, bounds)
+            }
+            readerView.onScaleChangedByGesture = { scale in
+                context.coordinator.scaleFactor.wrappedValue = scale
+                context.coordinator.autoScales.wrappedValue = false
             }
             readerView.activeTool = activeTool
             readerView.highlightColorHex = highlightColorHex
@@ -400,7 +408,7 @@ struct PDFViewportSnapshot: Equatable {
     var pageFrames: [Int: CGRect]
 }
 
-final class ReaderPDFView: PDFView {
+final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
     var onSelectionHover: ((Bool) -> Void)?
     var onSelectionCleared: (() -> Void)?
     var onHighlightedTextHover: ((String, Int, CGPoint?, NormalizedRect?) -> Void)?
@@ -411,6 +419,7 @@ final class ReaderPDFView: PDFView {
     var onPageMarginCommentRequested: ((Int, NormalizedPoint) -> Void)?
     var onOCRPageRequested: ((Int) -> Void)?
     var onRegionSelected: ((Int, NormalizedRect) -> Void)?
+    var onScaleChangedByGesture: ((Double) -> Void)?
     var activeTool: ReaderTool?
     var highlightColorHex = "#F7D154"
     var onAnnotationCreated: ((Annotation) -> Void)?
@@ -424,6 +433,29 @@ final class ReaderPDFView: PDFView {
     private var pendingRegionStart: (page: PDFPage, point: CGPoint)?
     private var activeRegionCurrentPoint: CGPoint?
     private var activeRegionAnnotation: PDFAnnotation?
+    private lazy var pinchGestureRecognizer = NSMagnificationGestureRecognizer(
+        target: self,
+        action: #selector(handlePinchGesture(_:))
+    )
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        pinchGestureRecognizer.delegate = self
+        addGestureRecognizer(pinchGestureRecognizer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        pinchGestureRecognizer.delegate = self
+        addGestureRecognizer(pinchGestureRecognizer)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: NSGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === pinchGestureRecognizer || otherGestureRecognizer === pinchGestureRecognizer
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -555,14 +587,28 @@ final class ReaderPDFView: PDFView {
     }
 
     override func magnify(with event: NSEvent) {
+        applyMagnification(event.magnification)
+    }
+
+    @objc private func handlePinchGesture(_ recognizer: NSMagnificationGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed else {
+            return
+        }
+        let magnification = recognizer.magnification
+        recognizer.magnification = 0
+        applyMagnification(magnification)
+    }
+
+    private func applyMagnification(_ magnification: CGFloat) {
         autoScales = false
-        let multiplier = max(0.25, min(4.0, 1.0 + event.magnification))
+        let multiplier = max(0.25, min(4.0, 1.0 + magnification))
         guard multiplier.isFinite, multiplier > 0 else {
             return
         }
         let nextScale = max(minScaleFactor, min(maxScaleFactor, scaleFactor * multiplier))
         if abs(nextScale - scaleFactor) > 0.0005 {
             scaleFactor = nextScale
+            onScaleChangedByGesture?(nextScale)
         }
     }
 

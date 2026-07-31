@@ -81,7 +81,7 @@ final class LocalAgentProviderTests: XCTestCase {
         XCTAssertEqual(codexAgent?.executableURL, configuredURL)
     }
 
-    func testCodexCommandUsesExecModeAndMapsMaxEffortToXHigh() {
+    func testLegacyCodexCommandUsesExecModeAndMapsMaxEffortToXHigh() {
         let arguments = LocalAgentCommandBuilder.arguments(
             forModel: "codex",
             effort: .max
@@ -94,6 +94,59 @@ final class LocalAgentProviderTests: XCTestCase {
         XCTAssertFalse(arguments.contains("--ask-for-approval"))
         XCTAssertTrue(arguments.contains("model_reasoning_effort=\"xhigh\""))
         XCTAssertEqual(arguments.last, "-")
+    }
+
+    func testGPT56ModelPresetsExposeTheirSupportedThinkingLevels() {
+        XCTAssertEqual(
+            LocalAgentCommandBuilder.commonCodexModels.prefix(3),
+            [
+                LocalAgentCommandBuilder.gpt56SolModel,
+                LocalAgentCommandBuilder.gpt56TerraModel,
+                LocalAgentCommandBuilder.gpt56LunaModel
+            ]
+        )
+        XCTAssertTrue(
+            LocalAgentCommandBuilder.codexThinkingEfforts(
+                for: LocalAgentCommandBuilder.gpt56SolModel
+            ).contains(.ultra)
+        )
+        XCTAssertTrue(
+            LocalAgentCommandBuilder.codexThinkingEfforts(
+                for: LocalAgentCommandBuilder.gpt56TerraModel
+            ).contains(.ultra)
+        )
+        XCTAssertFalse(
+            LocalAgentCommandBuilder.codexThinkingEfforts(
+                for: LocalAgentCommandBuilder.gpt56LunaModel
+            ).contains(.ultra)
+        )
+    }
+
+    func testGPT56SolCommandPassesMaxAndUltraEffortsWithoutDowngrading() {
+        let maxArguments = LocalAgentCommandBuilder.arguments(
+            forModel: "codex",
+            effort: .max,
+            codexModelName: LocalAgentCommandBuilder.gpt56SolModel
+        )
+        let ultraArguments = LocalAgentCommandBuilder.arguments(
+            forModel: "codex",
+            effort: .ultra,
+            codexModelName: LocalAgentCommandBuilder.gpt56SolModel
+        )
+
+        XCTAssertTrue(maxArguments.contains("model_reasoning_effort=\"max\""))
+        XCTAssertTrue(ultraArguments.contains("model_reasoning_effort=\"ultra\""))
+    }
+
+    func testClaudeCommandClampsUltraToItsHighestSupportedEffort() {
+        let arguments = LocalAgentCommandBuilder.arguments(
+            forModel: "claude",
+            effort: .ultra
+        )
+
+        XCTAssertTrue(arguments.contains("--effort"))
+        XCTAssertTrue(arguments.contains("max"))
+        XCTAssertFalse(arguments.contains("ultra"))
     }
 
     func testCodexFastModeAddsFastModelOverride() {
@@ -212,5 +265,6 @@ final class LocalAgentProviderTests: XCTestCase {
         XCTAssertEqual(LocalAgentThinkingEffort.low.title, "Low")
         XCTAssertEqual(LocalAgentThinkingEffort.xhigh.title, "Extra High")
         XCTAssertEqual(LocalAgentThinkingEffort.max.title, "Max")
+        XCTAssertEqual(LocalAgentThinkingEffort.ultra.title, "Ultra")
     }
 }

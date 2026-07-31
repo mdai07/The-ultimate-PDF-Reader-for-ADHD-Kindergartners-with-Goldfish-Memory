@@ -28,7 +28,7 @@ struct AISidebarView: View {
                     HStack(spacing: 10) {
                         if state.selectedChatAgentIsLocalCLI {
                             Picker("Chat effort", selection: $state.chatThinkingEffort) {
-                                ForEach(LocalAgentThinkingEffort.allCases) { effort in
+                                ForEach(state.chatThinkingEffortOptions) { effort in
                                     Text(effort.title).tag(effort)
                                 }
                             }
@@ -37,7 +37,7 @@ struct AISidebarView: View {
 
                         if state.selectedInlineAgentIsLocalCLI {
                             Picker("Inline effort", selection: $state.inlineThinkingEffort) {
-                                ForEach(LocalAgentThinkingEffort.allCases) { effort in
+                                ForEach(state.inlineThinkingEffortOptions) { effort in
                                     Text(effort.title).tag(effort)
                                 }
                             }
@@ -60,7 +60,7 @@ struct AISidebarView: View {
                                     }
                                     Divider()
                                     ForEach(LocalAgentCommandBuilder.commonCodexModels, id: \.self) { model in
-                                        Button(model) {
+                                        Button(LocalAgentCommandBuilder.codexModelTitle(model)) {
                                             state.codexModelName = model
                                         }
                                     }
@@ -81,7 +81,7 @@ struct AISidebarView: View {
                                     }
                                     Divider()
                                     ForEach(LocalAgentCommandBuilder.commonCodexInlineModels, id: \.self) { model in
-                                        Button(model == LocalAgentCommandBuilder.codexMiniModel ? "GPT mini (\(model))" : model) {
+                                        Button(LocalAgentCommandBuilder.codexModelTitle(model)) {
                                             state.codexInlineModelName = model
                                         }
                                     }

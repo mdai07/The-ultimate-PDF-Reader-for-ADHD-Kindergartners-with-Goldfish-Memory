@@ -6,29 +6,46 @@ import WebKit
 
 struct MainWindowView: View {
     @EnvironmentObject private var state: ReaderAppState
+    private let windowAutosaveName: String
+
+    init(windowAutosaveName: String = ReaderWindowLayoutPersistence.mainWindowFrame) {
+        self.windowAutosaveName = windowAutosaveName
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ReaderChromeTabStrip()
-            HStack {
-                Spacer(minLength: 0)
-                ReaderTopToolStrip()
-            }
-            .background(.bar)
+            ReaderTopToolStrip()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .background(.bar)
 
             HSplitView {
-                SourceListView()
-                    .frame(minWidth: 178, idealWidth: 205, maxWidth: 300)
+                if state.isLeftSidebarVisible {
+                    SourceListView()
+                        .frame(minWidth: 170, idealWidth: 190, maxWidth: 280)
+                        .background(SplitViewAutosaveConfigurator(
+                            name: ReaderWindowLayoutPersistence.sourceListSplit,
+                            preservedPane: .leading
+                        ))
+                }
 
                 HSplitView {
                     ReaderPaneView()
                         .frame(minWidth: 520)
-                    AISidebarView()
-                        .frame(minWidth: 180, idealWidth: 220, maxWidth: 340)
+                    if state.isAISidebarVisible {
+                        AISidebarView()
+                            .frame(minWidth: 170, idealWidth: 190, maxWidth: 310)
+                            .background(SplitViewAutosaveConfigurator(
+                                name: ReaderWindowLayoutPersistence.aiSidebarSplit,
+                                preservedPane: .trailing
+                            ))
+                    }
                 }
-                .frame(minWidth: 700)
+                .frame(minWidth: state.isAISidebarVisible ? 690 : 520)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.18), value: state.isLeftSidebarVisible)
+            .animation(.easeInOut(duration: 0.18), value: state.isAISidebarVisible)
         }
         .safeAreaInset(edge: .bottom) {
             HStack {
@@ -47,6 +64,10 @@ struct MainWindowView: View {
             .background(.bar)
         }
         .background(WindowChromeConfigurator())
+        .background(ReaderWindowRegistrationView(
+            state: state,
+            frameAutosaveName: windowAutosaveName
+        ))
         .background(KeyCommandMonitor(
             selectionShortcutBindings: state.selectionShortcutBindings,
             onTemporaryStay: {
@@ -120,6 +141,7 @@ private struct ReaderChromeTabStrip: View {
 private struct ReaderChromeTab: View {
     @EnvironmentObject private var state: ReaderAppState
     let tab: ReaderDocumentTab
+    @State private var dragOffset = CGSize.zero
 
     private var isActive: Bool {
         tab.id == state.activeTabID
@@ -161,9 +183,26 @@ private struct ReaderChromeTab: View {
                 .stroke(isActive ? Color.secondary.opacity(0.24) : Color.secondary.opacity(0.12), lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: 8))
+        .offset(dragOffset)
+        .opacity(abs(dragOffset.height) > 12 ? 0.72 : 1)
         .onTapGesture {
             state.selectTab(tab.id)
         }
+        .gesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                .onChanged { value in
+                    dragOffset = value.translation
+                }
+                .onEnded { value in
+                    let shouldDetach = abs(value.translation.height) >= 44
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        dragOffset = .zero
+                    }
+                    if shouldDetach {
+                        state.moveTabToNewWindow(tab.id)
+                    }
+                }
+        )
         .contextMenu {
             Button("Open in Split View") {
                 state.splitView(withTab: tab.id)
@@ -190,7 +229,22 @@ private struct ReaderTopToolStrip: View {
     @FocusState private var isFindFieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        ViewThatFits(in: .horizontal) {
+            toolbarContent(isCompact: false)
+                .fixedSize(horizontal: true, vertical: false)
+            toolbarContent(isCompact: true)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .frame(height: 42)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private func toolbarContent(isCompact: Bool) -> some View {
+        HStack(spacing: isCompact ? 3 : 8) {
             IconActionButton(
                 systemName: "doc.badge.plus",
                 title: "Open PDF"
@@ -206,13 +260,13 @@ private struct ReaderTopToolStrip: View {
 
             verticalDivider
 
-            HStack(spacing: 5) {
+            HStack(spacing: isCompact ? 3 : 5) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13))
+                    .font(.system(size: isCompact ? 12 : 13))
                     .foregroundStyle(.secondary)
                 TextField("Find", text: $state.findQuery)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 150)
+                    .frame(width: isCompact ? 96 : 150)
                     .focused($isFindFieldFocused)
                     .onSubmit {
                         state.performFind()
@@ -224,7 +278,7 @@ private struct ReaderTopToolStrip: View {
                     .font(.caption2)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: isCompact ? 28 : 34, alignment: .trailing)
                 IconActionButton(
                     systemName: "chevron.up",
                     title: "Previous Result",
@@ -262,6 +316,22 @@ private struct ReaderTopToolStrip: View {
                 state.toggleSplitView()
             }
 
+            IconActionButton(
+                systemName: "sidebar.left",
+                title: state.isLeftSidebarVisible ? "Hide Left Sidebar" : "Show Left Sidebar",
+                isActive: state.isLeftSidebarVisible
+            ) {
+                state.toggleLeftSidebar()
+            }
+
+            IconActionButton(
+                systemName: "sidebar.right",
+                title: state.isAISidebarVisible ? "Hide AI Sidebar" : "Show AI Sidebar",
+                isActive: state.isAISidebarVisible
+            ) {
+                state.toggleAISidebar()
+            }
+
             verticalDivider
 
             IconActionButton(
@@ -276,7 +346,7 @@ private struct ReaderTopToolStrip: View {
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 42)
+                .frame(minWidth: isCompact ? 36 : 42)
 
             IconActionButton(
                 systemName: "arrow.up.left.and.down.right.magnifyingglass",
@@ -311,42 +381,59 @@ private struct ReaderTopToolStrip: View {
             ) {
                 state.presentExportPanel()
             }
-
         }
-        .padding(.horizontal, 12)
+        .environment(\.readerToolbarIsCompact, isCompact)
+        .padding(.horizontal, isCompact ? 5 : 12)
         .padding(.vertical, 5)
-        .frame(height: 42)
-        .fixedSize(horizontal: true, vertical: false)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
     }
 
     private var verticalDivider: some View {
         Rectangle()
             .fill(Color.secondary.opacity(0.22))
-            .frame(width: 1, height: 22)
-            .padding(.horizontal, 2)
+            .frame(width: 1, height: 20)
+            .padding(.horizontal, 1)
+    }
+}
+
+private struct ReaderToolbarCompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var readerToolbarIsCompact: Bool {
+        get { self[ReaderToolbarCompactKey.self] }
+        set { self[ReaderToolbarCompactKey.self] = newValue }
     }
 }
 
 private struct IconActionButton: View {
+    @Environment(\.readerToolbarIsCompact) private var isCompact
     let systemName: String
     let title: String
     var isDisabled = false
+    var isActive = false
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 17, weight: .regular))
-                .frame(width: 23, height: 23)
-                .padding(4)
+                .font(.system(size: isCompact ? 15 : 17, weight: .regular))
+                .frame(width: isCompact ? 20 : 23, height: isCompact ? 20 : 23)
+                .padding(isCompact ? 2 : 4)
+                .background {
+                    if isActive {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.accentColor.opacity(0.16))
+                    }
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isDisabled ? Color.secondary.opacity(0.45) : Color.primary)
+        .foregroundStyle(
+            isDisabled
+                ? Color.secondary.opacity(0.45)
+                : (isActive ? Color.accentColor : Color.primary)
+        )
         .disabled(isDisabled)
         .help(title)
         .delayedIconTooltip(title)
@@ -487,6 +574,7 @@ private func colorHexesMatch(_ lhs: String, _ rhs: String) -> Bool {
 
 private struct ReaderToolButton: View {
     @EnvironmentObject private var state: ReaderAppState
+    @Environment(\.readerToolbarIsCompact) private var isCompact
     let tool: ReaderTool
 
     private var isActive: Bool {
@@ -522,8 +610,8 @@ private struct ReaderToolButton: View {
             isActive: isActive,
             highlightColor: Color(hex: state.highlightColorHex) ?? .yellow
         )
-            .frame(width: 23, height: 23)
-            .padding(4)
+            .frame(width: isCompact ? 20 : 23, height: isCompact ? 20 : 23)
+            .padding(isCompact ? 2 : 4)
             .background {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(isActive ? activeColor.opacity(isLocked ? 0.20 : 0.11) : Color.clear)
@@ -1205,6 +1293,10 @@ struct ReaderPaneView: View {
                     if let splitTab = state.splitTab {
                         SecondaryReaderDocumentPanel(tab: splitTab)
                             .frame(minWidth: 320)
+                            .background(SplitViewAutosaveConfigurator(
+                                name: ReaderWindowLayoutPersistence.documentComparisonSplit,
+                                preservedPane: .leading
+                            ))
                     }
                 }
             } else {
@@ -1236,9 +1328,13 @@ struct ReaderDocumentPanel: View {
             ZStack {
                 HSplitView {
                     PDFReaderCanvas(document: document)
-                        .frame(minWidth: 380)
+                        .frame(minWidth: 400)
                     OutsideCommentRailView(commentDragYFractions: $commentDragYFractions)
-                        .frame(minWidth: 120, idealWidth: 150, maxWidth: 280)
+                        .frame(minWidth: 96, idealWidth: 118, maxWidth: 240)
+                        .background(SplitViewAutosaveConfigurator(
+                            name: ReaderWindowLayoutPersistence.commentRailSplit,
+                            preservedPane: .trailing
+                        ))
                 }
 
                 MarginConnectorOverlay(size: proxy.size, commentDragYFractions: commentDragYFractions)

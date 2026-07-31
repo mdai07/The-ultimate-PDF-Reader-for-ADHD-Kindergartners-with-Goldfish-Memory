@@ -190,6 +190,12 @@ final class ReaderAppState: ObservableObject {
     @Published var activeTabID: UUID?
     @Published var splitTabID: UUID?
     @Published var isSplitViewEnabled = false
+    @Published var isLeftSidebarVisible = UserDefaults.standard.object(forKey: "LeftSidebarVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isLeftSidebarVisible, forKey: "LeftSidebarVisible") }
+    }
+    @Published var isAISidebarVisible = UserDefaults.standard.object(forKey: "AISidebarVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isAISidebarVisible, forKey: "AISidebarVisible") }
+    }
     @Published var currentPageIndex = 0
     @Published var pdfScaleFactor: Double = 1.0
     @Published var pdfAutoScales = true
@@ -223,11 +229,13 @@ final class ReaderAppState: ObservableObject {
     @Published var selectedAgentID = UserDefaults.standard.string(forKey: "SidebarAgentID") ?? ReaderAppState.deepSeekProAgentID {
         didSet {
             UserDefaults.standard.set(selectedAgentID, forKey: "SidebarAgentID")
+            normalizeThinkingEffortsForSelectedAgents()
         }
     }
     @Published var inlineAgentID = UserDefaults.standard.string(forKey: "InlineAgentID") ?? ReaderAppState.deepSeekFlashAgentID {
         didSet {
             UserDefaults.standard.set(inlineAgentID, forKey: "InlineAgentID")
+            normalizeThinkingEffortsForSelectedAgents()
         }
     }
     @Published var customDeepSeekAPIKey = ""
@@ -257,13 +265,22 @@ final class ReaderAppState: ObservableObject {
         didSet { UserDefaults.standard.set(inlineThinkingEffort.rawValue, forKey: "InlineThinkingEffort") }
     }
     @Published var codexFastModeEnabled = UserDefaults.standard.bool(forKey: "CodexFastModeEnabled") {
-        didSet { UserDefaults.standard.set(codexFastModeEnabled, forKey: "CodexFastModeEnabled") }
+        didSet {
+            UserDefaults.standard.set(codexFastModeEnabled, forKey: "CodexFastModeEnabled")
+            normalizeThinkingEffortsForSelectedAgents()
+        }
     }
     @Published var codexModelName = UserDefaults.standard.string(forKey: "CodexModelName") ?? "" {
-        didSet { UserDefaults.standard.set(codexModelName, forKey: "CodexModelName") }
+        didSet {
+            UserDefaults.standard.set(codexModelName, forKey: "CodexModelName")
+            normalizeThinkingEffortsForSelectedAgents()
+        }
     }
     @Published var codexInlineModelName = UserDefaults.standard.string(forKey: "CodexInlineModelName") ?? "" {
-        didSet { UserDefaults.standard.set(codexInlineModelName, forKey: "CodexInlineModelName") }
+        didSet {
+            UserDefaults.standard.set(codexInlineModelName, forKey: "CodexInlineModelName")
+            normalizeThinkingEffortsForSelectedAgents()
+        }
     }
     @Published var claudeModelName = UserDefaults.standard.string(forKey: "ClaudeModelName") ?? "" {
         didSet { UserDefaults.standard.set(claudeModelName, forKey: "ClaudeModelName") }
@@ -325,6 +342,7 @@ final class ReaderAppState: ObservableObject {
         reloadGeminiConfiguration()
         discoverLocalAgentPathsOnStartup()
         refreshAgentProfiles()
+        normalizeThinkingEffortsForSelectedAgents()
         loadStoredAPICredentials()
     }
 
@@ -507,6 +525,46 @@ final class ReaderAppState: ObservableObject {
             profile.id == "local-claude"
                 && profile.model == "claude"
                 && (profile.id == selectedAgentID || profile.id == inlineAgentID)
+        }
+    }
+
+    var chatThinkingEffortOptions: [LocalAgentThinkingEffort] {
+        thinkingEffortOptions(for: selectedAgentID, codexModelName: codexModelName)
+    }
+
+    var inlineThinkingEffortOptions: [LocalAgentThinkingEffort] {
+        thinkingEffortOptions(for: inlineAgentID, codexModelName: codexInlineModelName)
+    }
+
+    private func thinkingEffortOptions(
+        for agentID: String,
+        codexModelName: String
+    ) -> [LocalAgentThinkingEffort] {
+        guard let profile = agentProfiles.first(where: { $0.id == agentID }) else {
+            return []
+        }
+        switch profile.model.lowercased() {
+        case "codex":
+            return LocalAgentCommandBuilder.codexThinkingEfforts(
+                for: codexModelName,
+                fastMode: codexFastModeEnabled
+            )
+        case "claude":
+            return LocalAgentCommandBuilder.claudeThinkingEfforts
+        default:
+            return []
+        }
+    }
+
+    private func normalizeThinkingEffortsForSelectedAgents() {
+        let chatOptions = chatThinkingEffortOptions
+        if !chatOptions.isEmpty, !chatOptions.contains(chatThinkingEffort) {
+            chatThinkingEffort = chatOptions.last ?? .high
+        }
+
+        let inlineOptions = inlineThinkingEffortOptions
+        if !inlineOptions.isEmpty, !inlineOptions.contains(inlineThinkingEffort) {
+            inlineThinkingEffort = inlineOptions.last ?? .low
         }
     }
 
@@ -695,30 +753,43 @@ final class ReaderAppState: ObservableObject {
     }
 
     func open(url: URL) {
-        guard let document = PDFDocument(url: url) else {
-            statusMessage = "Could not open \(url.lastPathComponent)."
+        let resolvedURL = Self.canonicalPDFURL(url)
+        if selectOpenTab(for: resolvedURL) {
+            statusMessage = "Selected \(resolvedURL.lastPathComponent)."
+            return
+        }
+        if DetachedReaderWindowRegistry.shared.focusDocument(
+            at: resolvedURL,
+            excluding: self
+        ) {
+            statusMessage = "\(resolvedURL.lastPathComponent) is already open in another window."
+            return
+        }
+
+        guard let document = PDFDocument(url: resolvedURL) else {
+            statusMessage = "Could not open \(resolvedURL.lastPathComponent)."
             return
         }
 
         clearTemporaryHighlights()
         clearTemporarySourceHighlights()
-        if !recentFiles.contains(url) {
-            recentFiles.insert(url, at: 0)
+        if !recentFiles.contains(resolvedURL) {
+            recentFiles.insert(resolvedURL, at: 0)
         }
 
         do {
-            let sidecarURL = try? legacySidecarStore.sidecarURL(for: url)
+            let sidecarURL = try? legacySidecarStore.sidecarURL(for: resolvedURL)
             var loadedSession: DocumentSession
             var shouldPersistHiddenMetadata = false
 
-            if let embeddedSession = try? PDFEmbeddedMetadataStore.loadSession(from: document, pdfURL: url) {
+            if let embeddedSession = try? PDFEmbeddedMetadataStore.loadSession(from: document, pdfURL: resolvedURL) {
                 loadedSession = embeddedSession
             } else if let sidecarURL,
                       FileManager.default.fileExists(atPath: sidecarURL.path) {
                 loadedSession = try legacySidecarStore.load(from: sidecarURL)
                 shouldPersistHiddenMetadata = true
             } else {
-                loadedSession = PDFDocumentController.makeSession(from: document, pdfURL: url)
+                loadedSession = PDFDocumentController.makeSession(from: document, pdfURL: resolvedURL)
             }
 
             let beforeExternalImport = loadedSession
@@ -731,14 +802,14 @@ final class ReaderAppState: ObservableObject {
                 try PDFExportService().saveInPlaceWithHiddenMetadata(
                     document: document,
                     session: loadedSession,
-                    to: url
+                    to: resolvedURL
                 )
             }
             let outline = PDFDocumentController.makeOutline(from: document, session: loadedSession)
             let memory = Self.localPaperMemory(for: loadedSession)
 
             let tab = ReaderDocumentTab(
-                pdfURL: url,
+                pdfURL: resolvedURL,
                 pdfDocument: document,
                 session: loadedSession,
                 currentPageIndex: 0,
@@ -752,10 +823,26 @@ final class ReaderAppState: ObservableObject {
             loadActiveTabState()
             documentEditHistory.clear()
             primePaperMemory()
-            statusMessage = "Opened \(url.lastPathComponent)."
+            statusMessage = "Opened \(resolvedURL.lastPathComponent)."
         } catch {
             statusMessage = "Opened PDF, but hidden metadata failed: \(error.localizedDescription)"
         }
+    }
+
+    @discardableResult
+    func selectOpenTab(for url: URL) -> Bool {
+        let resolvedURL = Self.canonicalPDFURL(url)
+        guard let tab = openTabs.first(where: {
+            Self.canonicalPDFURL($0.pdfURL) == resolvedURL
+        }) else {
+            return false
+        }
+        selectTab(tab.id)
+        return true
+    }
+
+    private static func canonicalPDFURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     func selectTab(_ id: UUID) {
@@ -847,6 +934,14 @@ final class ReaderAppState: ObservableObject {
             splitTabID = openTabs.first(where: { $0.id != activeTabID })?.id
         }
         keepSplitTabDistinctFromActive()
+    }
+
+    func toggleLeftSidebar() {
+        isLeftSidebarVisible.toggle()
+    }
+
+    func toggleAISidebar() {
+        isAISidebarVisible.toggle()
     }
 
     func setSplitTab(_ id: UUID?) {
@@ -1079,14 +1174,14 @@ final class ReaderAppState: ObservableObject {
 
     func zoomPDFIn() {
         pdfAutoScales = false
-        pdfScaleFactor = min(5.0, max(0.25, pdfScaleFactor) * 1.15)
+        pdfScaleFactor = min(12.0, max(0.10, pdfScaleFactor) * 1.15)
         syncActiveTabState()
         statusMessage = "PDF zoom \(Int(pdfScaleFactor * 100))%."
     }
 
     func zoomPDFOut() {
         pdfAutoScales = false
-        pdfScaleFactor = max(0.25, min(5.0, pdfScaleFactor) / 1.15)
+        pdfScaleFactor = max(0.10, min(12.0, pdfScaleFactor) / 1.15)
         syncActiveTabState()
         statusMessage = "PDF zoom \(Int(pdfScaleFactor * 100))%."
     }
