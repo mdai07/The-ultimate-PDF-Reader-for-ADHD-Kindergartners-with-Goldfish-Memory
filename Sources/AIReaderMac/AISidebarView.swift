@@ -408,14 +408,12 @@ struct ChatBubbleView: View {
                 .foregroundStyle(.secondary)
             ChatBubbleMessageBody(message: message, viewportHeight: viewportHeight)
 
-            if !message.citations.isEmpty {
-                HStack {
-                    ForEach(message.citations, id: \.self) { citation in
-                        Text("p. \(citation.pageIndex + 1) \(citation.label)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            if message.role == .assistant,
+               let citationSummary = ChatCitationSummary.text(for: message.citations) {
+                Text(citationSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             if message.role == .assistant {

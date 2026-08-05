@@ -1157,6 +1157,27 @@ final class ReaderAppState: ObservableObject {
         }
     }
 
+    func presentPrintPanel() {
+        guard let pdfDocument else {
+            statusMessage = "Open a PDF before printing."
+            return
+        }
+
+        let printInfo = NSPrintInfo.shared
+        guard let operation = pdfDocument.printOperation(
+            for: printInfo,
+            scalingMode: .pageScaleToFit,
+            autoRotate: true
+        ) else {
+            statusMessage = "Could not prepare the PDF for printing."
+            return
+        }
+
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.run()
+    }
+
     func handlePageChange(pageIndex: Int) {
         let resolvedPageIndex = max(0, pageIndex)
         guard currentPageIndex != resolvedPageIndex else {
@@ -1933,7 +1954,10 @@ final class ReaderAppState: ObservableObject {
         }
 
         let context = contextForCurrentSelection(session: session)
-        let userMessage = ChatMessage(role: .user, content: question, citations: context.citations)
+        // The context is sent to the provider below. Keeping it out of the
+        // visible user message prevents whole-paper source lists from being
+        // rendered as if they were part of the question.
+        let userMessage = ChatMessage(role: .user, content: question)
         appendChatMessage(userMessage, to: activeTabID)
 
         switch resolveAIProvider(agentID: selectedAgentID, purpose: .sidebarChat) {

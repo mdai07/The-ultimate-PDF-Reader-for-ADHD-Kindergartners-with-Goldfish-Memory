@@ -433,6 +433,8 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
     private var pendingRegionStart: (page: PDFPage, point: CGPoint)?
     private var activeRegionCurrentPoint: CGPoint?
     private var activeRegionAnnotation: PDFAnnotation?
+    private var mouseDownViewPoint: CGPoint?
+    private var didDragSinceMouseDown = false
     private lazy var pinchGestureRecognizer = NSMagnificationGestureRecognizer(
         target: self,
         action: #selector(handlePinchGesture(_:))
@@ -515,12 +517,10 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
         default:
             break
         }
+        beginClickTracking(with: event)
         if !isEventInsideCurrentSelection(event) {
             setSelectionHover(false)
             onSelectionCleared?()
-        }
-        if handleHighlightedTextClick(event) {
-            return
         }
         if beginSmartRegionSelectionIfNeeded(at: event) {
             return
@@ -530,6 +530,7 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
 
     override func mouseDragged(with event: NSEvent) {
         NSCursor.arrow.set()
+        updateClickTracking(with: event)
         if pendingRegionStart != nil {
             continueSmartRegionSelection(at: event)
             return
@@ -551,25 +552,35 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
         NSCursor.arrow.set()
         if pendingRegionStart != nil {
             finishSmartRegionSelection(at: event)
+            clearClickTracking()
             return
         }
         switch activeTool {
         case .ink:
             finishInk(at: event)
+            clearClickTracking()
             return
         case .signature:
             finishSignature(at: event)
+            clearClickTracking()
             return
         default:
             break
         }
-        if handleLinkClick(event) {
+        let isClick = isClickGesture(endingWith: event)
+        if isClick, handleLinkClick(event) {
+            clearClickTracking()
             return
         }
         super.mouseUp(with: event)
+        if isClick, handleHighlightedTextClick(event) {
+            clearClickTracking()
+            return
+        }
         if activeTool == .highlight {
             addHighlightFromCurrentSelection()
         }
+        clearClickTracking()
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -1197,15 +1208,9 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
     }
 
     private func wordTextNear(_ point: CGPoint, on page: PDFPage) -> String? {
-        let offsets = [
-            CGPoint.zero,
-            CGPoint(x: -3, y: 0),
-            CGPoint(x: 3, y: 0),
-            CGPoint(x: 0, y: -3),
-            CGPoint(x: 0, y: 3),
-            CGPoint(x: -3, y: -3),
-            CGPoint(x: 3, y: 3)
-        ]
+        let offsets = [-6.0, 0, 6.0].flatMap { y in
+            [-6.0, 0, 6.0].map { x in CGPoint(x: x, y: y) }
+        }
         let pageBounds = page.bounds(for: .mediaBox)
         for offset in offsets {
             let candidate = CGPoint(x: point.x + offset.x, y: point.y + offset.y)
@@ -1216,7 +1221,49 @@ final class ReaderPDFView: PDFView, NSGestureRecognizerDelegate {
             }
             return text
         }
+
+        // PDFKit's word hit test is exact enough to miss spaces, line edges, and
+        // superscripts. Treat a small area around a real text line as text so a
+        // natural drag still reaches PDFKit instead of becoming a region drag.
+        for verticalOffset in [-6.0, 0, 6.0] {
+            let candidate = CGPoint(x: point.x, y: point.y + verticalOffset)
+            guard pageBounds.contains(candidate),
+                  let selection = page.selectionForLine(at: candidate),
+                  let text = selection.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else {
+                continue
+            }
+            let lineBounds = selection.bounds(for: page).insetBy(dx: -8, dy: -6)
+            if lineBounds.contains(point) {
+                return text
+            }
+        }
         return nil
+    }
+
+    private func beginClickTracking(with event: NSEvent) {
+        mouseDownViewPoint = convert(event.locationInWindow, from: nil)
+        didDragSinceMouseDown = false
+    }
+
+    private func updateClickTracking(with event: NSEvent) {
+        guard let mouseDownViewPoint else {
+            return
+        }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        if hypot(currentPoint.x - mouseDownViewPoint.x, currentPoint.y - mouseDownViewPoint.y) > 4 {
+            didDragSinceMouseDown = true
+        }
+    }
+
+    private func isClickGesture(endingWith event: NSEvent) -> Bool {
+        updateClickTracking(with: event)
+        return mouseDownViewPoint != nil && didDragSinceMouseDown == false
+    }
+
+    private func clearClickTracking() {
+        mouseDownViewPoint = nil
+        didDragSinceMouseDown = false
     }
 
     private func updateSelectionHover(with event: NSEvent) {

@@ -55,6 +55,14 @@ struct UprakigoApp: App {
                     state.presentExportPanel()
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Print...") {
+                    state.presentPrintPanel()
+                }
+                .keyboardShortcut("p")
+                .disabled(state.pdfDocument == nil)
             }
 
             CommandGroup(replacing: .sidebar) {
